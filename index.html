@@ -157,8 +157,8 @@
         <label class="file-label" for="fileInput">이미지 첨부</label>
         <input id="fileInput" type="file" accept="image/*" />
 
-        <label class="file-label" for="folderInput">폴더 선택</label>
-        <input id="folderInput" type="file" accept="image/*" webkitdirectory directory multiple />
+        <label class="file-label" for="multiInput">여러 이미지 선택</label>
+        <input id="multiInput" type="file" accept="image/*" multiple />
 
         <button id="playBtn" class="primary" type="button" disabled>▶ 시작</button>
 
@@ -177,7 +177,7 @@
       <div id="viewer" class="viewer">
         <canvas id="canvas"></canvas>
         <div id="empty" class="empty">
-          <div><strong>이미지를 끌어놓거나 첨부하세요</strong>스프라이트 시트 한 장 또는 이미지 폴더를 선택할 수 있습니다.</div>
+          <div><strong>이미지를 끌어놓거나 첨부하세요</strong>스프라이트 시트 한 장 또는 여러 이미지 파일을 선택할 수 있습니다.</div>
         </div>
       </div>
 
@@ -193,7 +193,7 @@
       'use strict';
 
       const fileInput = document.getElementById('fileInput');
-      const folderInput = document.getElementById('folderInput');
+      const multiInput = document.getElementById('multiInput');
       const playBtn = document.getElementById('playBtn');
       const colsInput = document.getElementById('cols');
       const rowsInput = document.getElementById('rows');
@@ -262,7 +262,7 @@
         colsField.classList.toggle('disabled', folderMode);
         rowsField.classList.toggle('disabled', folderMode);
         headerHint.textContent = folderMode
-          ? '폴더 이미지 파일명 순서 재생 · 기본 16 FPS'
+          ? '여러 이미지 파일명 순서 재생 · 기본 16 FPS'
           : '스프라이트 시트 기본값: 4열 × 4행 · 16 FPS';
       }
 
@@ -357,13 +357,13 @@
         nextImage.src = objectUrl;
       }
 
-      async function loadFolder(fileList) {
+      async function loadSequence(fileList) {
         const files = Array.from(fileList)
           .filter(file => file.type.startsWith('image/'))
           .sort((a, b) => naturalSort.compare(a.webkitRelativePath || a.name, b.webkitRelativePath || b.name));
 
         if (!files.length) {
-          alert('폴더 안에 이미지 파일이 없습니다.');
+          alert('선택한 파일 중 이미지가 없습니다.');
           return;
         }
 
@@ -394,7 +394,7 @@
           sequence = loaded;
           empty.hidden = true;
           playBtn.disabled = false;
-          fileStatus.textContent = `폴더 이미지 ${sequence.length}개 · 파일명 순서`;
+          fileStatus.textContent = `다중 이미지 ${sequence.length}개 · 파일명 순서`; 
           drawFrame();
         } catch (error) {
           clearSequence();
@@ -408,8 +408,10 @@
         event.target.value = '';
       });
 
-      folderInput.addEventListener('change', event => {
-        loadFolder(event.target.files);
+      multiInput.addEventListener('change', event => {
+        const files = Array.from(event.target.files || []);
+        if (files.length === 1) loadSheet(files[0]);
+        else loadSequence(files);
         event.target.value = '';
       });
 
@@ -445,7 +447,7 @@
 
       viewer.addEventListener('drop', event => {
         const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
-        if (files.length > 1) loadFolder(files);
+        if (files.length > 1) loadSequence(files);
         else if (files.length === 1) loadSheet(files[0]);
         else alert('이미지 파일을 끌어놓아 주세요.');
       });
