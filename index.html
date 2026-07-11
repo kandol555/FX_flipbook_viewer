@@ -51,9 +51,7 @@
       gap: 10px;
       margin-bottom: 16px;
     }
-    button, .file-label, input, select {
-      font: inherit;
-    }
+    button, .file-label, input { font: inherit; }
     button, .file-label {
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -71,7 +69,7 @@
       background: linear-gradient(135deg, #ff7a31, #e94b23);
       font-weight: 750;
     }
-    button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    button:disabled, .file-label.disabled { opacity: .45; cursor: not-allowed; transform: none; }
     input[type="file"] { display: none; }
     .field {
       display: inline-flex;
@@ -84,6 +82,7 @@
       border-radius: 12px;
       padding: 7px 10px;
     }
+    .field.disabled { opacity: .45; }
     .field input[type="number"] {
       width: 54px;
       border: 0;
@@ -150,7 +149,7 @@
   <section class="app">
     <header>
       <h1>플립북 이미지 뷰어</h1>
-      <div class="hint">스프라이트 시트 기본값: 4열 × 4행</div>
+      <div id="headerHint" class="hint">스프라이트 시트 기본값: 4열 × 4행 · 16 FPS</div>
     </header>
 
     <main>
@@ -158,12 +157,15 @@
         <label class="file-label" for="fileInput">이미지 첨부</label>
         <input id="fileInput" type="file" accept="image/*" />
 
+        <label class="file-label" for="folderInput">폴더 선택</label>
+        <input id="folderInput" type="file" accept="image/*" webkitdirectory directory multiple />
+
         <button id="playBtn" class="primary" type="button" disabled>▶ 시작</button>
 
-        <label class="field">열
+        <label id="colsField" class="field">열
           <input id="cols" type="number" min="1" max="64" value="4" />
         </label>
-        <label class="field">행
+        <label id="rowsField" class="field">행
           <input id="rows" type="number" min="1" max="64" value="4" />
         </label>
         <label class="field">속도
@@ -175,7 +177,7 @@
       <div id="viewer" class="viewer">
         <canvas id="canvas"></canvas>
         <div id="empty" class="empty">
-          <div><strong>이미지를 여기에 끌어놓거나 첨부하세요</strong>첨부한 뒤 “시작”을 누르면 재생되고, 다시 누르면 멈춥니다.</div>
+          <div><strong>이미지를 끌어놓거나 첨부하세요</strong>스프라이트 시트 한 장 또는 이미지 폴더를 선택할 수 있습니다.</div>
         </div>
       </div>
 
@@ -191,9 +193,12 @@
       'use strict';
 
       const fileInput = document.getElementById('fileInput');
+      const folderInput = document.getElementById('folderInput');
       const playBtn = document.getElementById('playBtn');
       const colsInput = document.getElementById('cols');
       const rowsInput = document.getElementById('rows');
+      const colsField = document.getElementById('colsField');
+      const rowsField = document.getElementById('rowsField');
       const fpsInput = document.getElementById('fps');
       const fpsText = document.getElementById('fpsText');
       const canvas = document.getElementById('canvas');
@@ -202,11 +207,16 @@
       const empty = document.getElementById('empty');
       const fileStatus = document.getElementById('fileStatus');
       const frameStatus = document.getElementById('frameStatus');
+      const headerHint = document.getElementById('headerHint');
 
-      let image = null;
+      let mode = 'sheet';
+      let sheetImage = null;
+      let sequence = [];
       let frame = 0;
       let playing = false;
       let timer = null;
+
+      const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
       const clampInt = (value, min, max, fallback) => {
         const n = Number.parseInt(value, 10);
@@ -221,6 +231,10 @@
         return { cols, rows, total: cols * rows };
       }
 
+      function totalFrames() {
+        return mode === 'folder' ? sequence.length : (sheetImage ? grid().total : 0);
+      }
+
       function stop() {
         playing = false;
         playBtn.textContent = '▶ 시작';
@@ -230,40 +244,81 @@
         }
       }
 
-      function drawFrame() {
-        if (!image) return;
+      function clearSequence() {
+        sequence.forEach(item => URL.revokeObjectURL(item.url));
+        sequence = [];
+      }
 
+      function clearSheet() {
+        if (sheetImage?.dataset?.url) URL.revokeObjectURL(sheetImage.dataset.url);
+        sheetImage = null;
+      }
+
+      function setMode(nextMode) {
+        mode = nextMode;
+        const folderMode = mode === 'folder';
+        colsInput.disabled = folderMode;
+        rowsInput.disabled = folderMode;
+        colsField.classList.toggle('disabled', folderMode);
+        rowsField.classList.toggle('disabled', folderMode);
+        headerHint.textContent = folderMode
+          ? '폴더 이미지 파일명 순서 재생 · 기본 16 FPS'
+          : '스프라이트 시트 기본값: 4열 × 4행 · 16 FPS';
+      }
+
+      function fitCanvas(width, height) {
+        const maxSide = 760;
+        const scale = Math.min(1, maxSide / Math.max(width, height));
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+      }
+
+      function drawSheetFrame() {
+        if (!sheetImage) return;
         const { cols, rows, total } = grid();
         frame = ((frame % total) + total) % total;
 
-        const sourceW = image.naturalWidth / cols;
-        const sourceH = image.naturalHeight / rows;
+        const sourceW = sheetImage.naturalWidth / cols;
+        const sourceH = sheetImage.naturalHeight / rows;
         const col = frame % cols;
         const row = Math.floor(frame / cols);
 
-        const maxSide = 760;
-        const scale = Math.min(1, maxSide / Math.max(sourceW, sourceH));
-        canvas.width = Math.max(1, Math.round(sourceW * scale));
-        canvas.height = Math.max(1, Math.round(sourceH * scale));
-
+        fitCanvas(sourceW, sourceH);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(
-          image,
+          sheetImage,
           col * sourceW, row * sourceH, sourceW, sourceH,
           0, 0, canvas.width, canvas.height
         );
-
         frameStatus.textContent = `프레임 ${frame + 1} / ${total}`;
       }
 
+      function drawFolderFrame() {
+        if (!sequence.length) return;
+        frame = ((frame % sequence.length) + sequence.length) % sequence.length;
+        const item = sequence[frame];
+        const img = item.image;
+
+        fitCanvas(img.naturalWidth, img.naturalHeight);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        frameStatus.textContent = `이미지 ${frame + 1} / ${sequence.length}`;
+        fileStatus.textContent = `${item.name} · ${img.naturalWidth}×${img.naturalHeight}`;
+      }
+
+      function drawFrame() {
+        if (mode === 'folder') drawFolderFrame();
+        else drawSheetFrame();
+      }
+
       function start() {
-        if (!image) return;
+        if (!totalFrames()) return;
         stop();
         playing = true;
         playBtn.textContent = '⏸ 멈춤';
         const fps = clampInt(fpsInput.value, 1, 30, 16);
         timer = window.setInterval(() => {
-          frame = (frame + 1) % grid().total;
+          frame = (frame + 1) % totalFrames();
           drawFrame();
         }, 1000 / fps);
       }
@@ -273,40 +328,96 @@
         else start();
       }
 
-      function loadFile(file) {
+      function loadSheet(file) {
         if (!file || !file.type.startsWith('image/')) {
           alert('이미지 파일을 선택해 주세요.');
           return;
         }
 
         stop();
+        clearSequence();
+        clearSheet();
+        setMode('sheet');
+
         const objectUrl = URL.createObjectURL(file);
         const nextImage = new Image();
-
         nextImage.onload = () => {
-          if (image && image.dataset.url) URL.revokeObjectURL(image.dataset.url);
           nextImage.dataset.url = objectUrl;
-          image = nextImage;
+          sheetImage = nextImage;
           frame = 0;
           empty.hidden = true;
           playBtn.disabled = false;
-          fileStatus.textContent = `${file.name} · ${image.naturalWidth}×${image.naturalHeight}`;
+          fileStatus.textContent = `${file.name} · ${sheetImage.naturalWidth}×${sheetImage.naturalHeight}`;
           drawFrame();
         };
-
         nextImage.onerror = () => {
           URL.revokeObjectURL(objectUrl);
           alert('이미지를 불러오지 못했습니다.');
         };
-
         nextImage.src = objectUrl;
       }
 
-      fileInput.addEventListener('change', event => loadFile(event.target.files[0]));
+      async function loadFolder(fileList) {
+        const files = Array.from(fileList)
+          .filter(file => file.type.startsWith('image/'))
+          .sort((a, b) => naturalSort.compare(a.webkitRelativePath || a.name, b.webkitRelativePath || b.name));
+
+        if (!files.length) {
+          alert('폴더 안에 이미지 파일이 없습니다.');
+          return;
+        }
+
+        stop();
+        clearSequence();
+        clearSheet();
+        setMode('folder');
+        frame = 0;
+        playBtn.disabled = true;
+        fileStatus.textContent = `이미지 ${files.length}개 불러오는 중...`;
+
+        try {
+          const loaded = await Promise.all(files.map(file => new Promise((resolve, reject) => {
+            const url = URL.createObjectURL(file);
+            const image = new Image();
+            image.onload = () => resolve({
+              name: file.webkitRelativePath || file.name,
+              url,
+              image
+            });
+            image.onerror = () => {
+              URL.revokeObjectURL(url);
+              reject(new Error(file.name));
+            };
+            image.src = url;
+          })));
+
+          sequence = loaded;
+          empty.hidden = true;
+          playBtn.disabled = false;
+          fileStatus.textContent = `폴더 이미지 ${sequence.length}개 · 파일명 순서`;
+          drawFrame();
+        } catch (error) {
+          clearSequence();
+          playBtn.disabled = true;
+          alert(`이미지를 불러오지 못했습니다: ${error.message}`);
+        }
+      }
+
+      fileInput.addEventListener('change', event => {
+        loadSheet(event.target.files[0]);
+        event.target.value = '';
+      });
+
+      folderInput.addEventListener('change', event => {
+        loadFolder(event.target.files);
+        event.target.value = '';
+      });
+
       playBtn.addEventListener('click', togglePlay);
 
       [colsInput, rowsInput].forEach(input => {
         input.addEventListener('change', () => {
+          if (mode !== 'sheet') return;
           stop();
           frame = 0;
           drawFrame();
@@ -332,12 +443,23 @@
         });
       });
 
-      viewer.addEventListener('drop', event => loadFile(event.dataTransfer.files[0]));
+      viewer.addEventListener('drop', event => {
+        const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+        if (files.length > 1) loadFolder(files);
+        else if (files.length === 1) loadSheet(files[0]);
+        else alert('이미지 파일을 끌어놓아 주세요.');
+      });
+
       window.addEventListener('keydown', event => {
-        if (event.code === 'Space' && image && event.target.tagName !== 'INPUT') {
+        if (event.code === 'Space' && totalFrames() && event.target.tagName !== 'INPUT') {
           event.preventDefault();
           togglePlay();
         }
+      });
+
+      window.addEventListener('beforeunload', () => {
+        clearSequence();
+        clearSheet();
       });
     })();
   </script>
