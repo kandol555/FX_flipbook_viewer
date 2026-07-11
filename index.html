@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>플립북 이미지 뷰어</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1a1e26;
+      --line: #303746;
+      --text: #f5f7fb;
+      --muted: #a9b1c2;
+      --accent: #ff6a2a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: radial-gradient(circle at top, #202633, var(--bg) 56%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .app {
+      width: min(920px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      overflow: hidden;
+      background: rgba(26, 30, 38, .96);
+      box-shadow: 0 24px 70px rgba(0,0,0,.35);
+    }
+    header {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    h1 { margin: 0; font-size: 20px; }
+    .hint { color: var(--muted); font-size: 13px; }
+    main { padding: 20px; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    button, .file-label, input, select {
+      font: inherit;
+    }
+    button, .file-label {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 15px;
+      background: #252b36;
+      color: var(--text);
+      cursor: pointer;
+      transition: .15s ease;
+      user-select: none;
+    }
+    button:hover, .file-label:hover { transform: translateY(-1px); border-color: #566176; }
+    button.primary {
+      min-width: 112px;
+      border-color: transparent;
+      background: linear-gradient(135deg, #ff7a31, #e94b23);
+      font-weight: 750;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    input[type="file"] { display: none; }
+    .field {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      background: #151922;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 7px 10px;
+    }
+    .field input[type="number"] {
+      width: 54px;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+      text-align: center;
+    }
+    .field input[type="range"] { width: 110px; accent-color: var(--accent); }
+    .viewer {
+      position: relative;
+      min-height: 520px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border: 1px dashed #3e4657;
+      border-radius: 16px;
+      background:
+        linear-gradient(45deg, #161a21 25%, transparent 25%),
+        linear-gradient(-45deg, #161a21 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #161a21 75%),
+        linear-gradient(-45deg, transparent 75%, #161a21 75%),
+        #101318;
+      background-size: 28px 28px;
+      background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+    }
+    .viewer.dragover { outline: 3px solid rgba(255,106,42,.55); outline-offset: -4px; }
+    canvas {
+      display: block;
+      max-width: 92%;
+      max-height: 68vh;
+      image-rendering: auto;
+      filter: drop-shadow(0 14px 28px rgba(0,0,0,.42));
+    }
+    .empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 30px;
+      text-align: center;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .empty[hidden] { display: none; }
+    .empty strong { display: block; margin-bottom: 8px; color: var(--text); font-size: 18px; }
+    .status {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 640px) {
+      body { padding: 10px; }
+      main { padding: 12px; }
+      .viewer { min-height: 400px; }
+      header { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <section class="app">
+    <header>
+      <h1>플립북 이미지 뷰어</h1>
+      <div class="hint">스프라이트 시트 기본값: 4열 × 4행</div>
+    </header>
+
+    <main>
+      <div class="toolbar">
+        <label class="file-label" for="fileInput">이미지 첨부</label>
+        <input id="fileInput" type="file" accept="image/*" />
+
+        <button id="playBtn" class="primary" type="button" disabled>▶ 시작</button>
+
+        <label class="field">열
+          <input id="cols" type="number" min="1" max="64" value="4" />
+        </label>
+        <label class="field">행
+          <input id="rows" type="number" min="1" max="64" value="4" />
+        </label>
+        <label class="field">속도
+          <input id="fps" type="range" min="1" max="30" value="16" />
+          <span id="fpsText">16 FPS</span>
+        </label>
+      </div>
+
+      <div id="viewer" class="viewer">
+        <canvas id="canvas"></canvas>
+        <div id="empty" class="empty">
+          <div><strong>이미지를 여기에 끌어놓거나 첨부하세요</strong>첨부한 뒤 “시작”을 누르면 재생되고, 다시 누르면 멈춥니다.</div>
+        </div>
+      </div>
+
+      <div class="status">
+        <span id="fileStatus">선택된 이미지 없음</span>
+        <span id="frameStatus">프레임 0 / 0</span>
+      </div>
+    </main>
+  </section>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const fileInput = document.getElementById('fileInput');
+      const playBtn = document.getElementById('playBtn');
+      const colsInput = document.getElementById('cols');
+      const rowsInput = document.getElementById('rows');
+      const fpsInput = document.getElementById('fps');
+      const fpsText = document.getElementById('fpsText');
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      const viewer = document.getElementById('viewer');
+      const empty = document.getElementById('empty');
+      const fileStatus = document.getElementById('fileStatus');
+      const frameStatus = document.getElementById('frameStatus');
+
+      let image = null;
+      let frame = 0;
+      let playing = false;
+      let timer = null;
+
+      const clampInt = (value, min, max, fallback) => {
+        const n = Number.parseInt(value, 10);
+        return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+      };
+
+      function grid() {
+        const cols = clampInt(colsInput.value, 1, 64, 4);
+        const rows = clampInt(rowsInput.value, 1, 64, 4);
+        colsInput.value = cols;
+        rowsInput.value = rows;
+        return { cols, rows, total: cols * rows };
+      }
+
+      function stop() {
+        playing = false;
+        playBtn.textContent = '▶ 시작';
+        if (timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
+      }
+
+      function drawFrame() {
+        if (!image) return;
+
+        const { cols, rows, total } = grid();
+        frame = ((frame % total) + total) % total;
+
+        const sourceW = image.naturalWidth / cols;
+        const sourceH = image.naturalHeight / rows;
+        const col = frame % cols;
+        const row = Math.floor(frame / cols);
+
+        const maxSide = 760;
+        const scale = Math.min(1, maxSide / Math.max(sourceW, sourceH));
+        canvas.width = Math.max(1, Math.round(sourceW * scale));
+        canvas.height = Math.max(1, Math.round(sourceH * scale));
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(
+          image,
+          col * sourceW, row * sourceH, sourceW, sourceH,
+          0, 0, canvas.width, canvas.height
+        );
+
+        frameStatus.textContent = `프레임 ${frame + 1} / ${total}`;
+      }
+
+      function start() {
+        if (!image) return;
+        stop();
+        playing = true;
+        playBtn.textContent = '⏸ 멈춤';
+        const fps = clampInt(fpsInput.value, 1, 30, 16);
+        timer = window.setInterval(() => {
+          frame = (frame + 1) % grid().total;
+          drawFrame();
+        }, 1000 / fps);
+      }
+
+      function togglePlay() {
+        if (playing) stop();
+        else start();
+      }
+
+      function loadFile(file) {
+        if (!file || !file.type.startsWith('image/')) {
+          alert('이미지 파일을 선택해 주세요.');
+          return;
+        }
+
+        stop();
+        const objectUrl = URL.createObjectURL(file);
+        const nextImage = new Image();
+
+        nextImage.onload = () => {
+          if (image && image.dataset.url) URL.revokeObjectURL(image.dataset.url);
+          nextImage.dataset.url = objectUrl;
+          image = nextImage;
+          frame = 0;
+          empty.hidden = true;
+          playBtn.disabled = false;
+          fileStatus.textContent = `${file.name} · ${image.naturalWidth}×${image.naturalHeight}`;
+          drawFrame();
+        };
+
+        nextImage.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          alert('이미지를 불러오지 못했습니다.');
+        };
+
+        nextImage.src = objectUrl;
+      }
+
+      fileInput.addEventListener('change', event => loadFile(event.target.files[0]));
+      playBtn.addEventListener('click', togglePlay);
+
+      [colsInput, rowsInput].forEach(input => {
+        input.addEventListener('change', () => {
+          stop();
+          frame = 0;
+          drawFrame();
+        });
+      });
+
+      fpsInput.addEventListener('input', () => {
+        fpsText.textContent = `${fpsInput.value} FPS`;
+        if (playing) start();
+      });
+
+      ['dragenter', 'dragover'].forEach(type => {
+        viewer.addEventListener(type, event => {
+          event.preventDefault();
+          viewer.classList.add('dragover');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach(type => {
+        viewer.addEventListener(type, event => {
+          event.preventDefault();
+          viewer.classList.remove('dragover');
+        });
+      });
+
+      viewer.addEventListener('drop', event => loadFile(event.dataTransfer.files[0]));
+      window.addEventListener('keydown', event => {
+        if (event.code === 'Space' && image && event.target.tagName !== 'INPUT') {
+          event.preventDefault();
+          togglePlay();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
