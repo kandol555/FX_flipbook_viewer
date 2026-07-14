@@ -26,7 +26,7 @@
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .app {
-      width: min(920px, 100%);
+      width: min(980px, 100%);
       border: 1px solid var(--line);
       border-radius: 20px;
       overflow: hidden;
@@ -51,8 +51,8 @@
       gap: 10px;
       margin-bottom: 16px;
     }
-    button, .file-label, input { font: inherit; }
-    button, .file-label {
+    button, .file-label, input, select { font: inherit; }
+    button, .file-label, select {
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 10px 15px;
@@ -62,14 +62,23 @@
       transition: .15s ease;
       user-select: none;
     }
-    button:hover, .file-label:hover { transform: translateY(-1px); border-color: #566176; }
+    button:hover, .file-label:hover, select:hover { transform: translateY(-1px); border-color: #566176; }
     button.primary {
       min-width: 112px;
       border-color: transparent;
       background: linear-gradient(135deg, #ff7a31, #e94b23);
       font-weight: 750;
     }
-    button:disabled, .file-label.disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    button.secondary {
+      background: linear-gradient(135deg, #3f8cff, #2a63ff);
+      border-color: transparent;
+      font-weight: 700;
+    }
+    button:disabled, .file-label.disabled, select:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+      transform: none;
+    }
     input[type="file"] { display: none; }
     .field {
       display: inline-flex;
@@ -92,6 +101,18 @@
       text-align: center;
     }
     .field input[type="range"] { width: 110px; accent-color: var(--accent); }
+    .field select {
+      padding: 6px 8px;
+      min-width: 82px;
+      background: #151922;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .field select option {
+      background: #ffffff;
+      color: #111111;
+    }
     .viewer {
       position: relative;
       min-height: 520px;
@@ -136,6 +157,7 @@
       padding-top: 12px;
       color: var(--muted);
       font-size: 13px;
+      flex-wrap: wrap;
     }
     @media (max-width: 640px) {
       body { padding: 10px; }
@@ -172,6 +194,20 @@
           <input id="fps" type="range" min="1" max="30" value="16" />
           <span id="fpsText">16 FPS</span>
         </label>
+
+        <label id="sheetSizeField" class="field">저장 시트
+          <select id="sheetSize" disabled>
+            <option value="2">2 × 2</option>
+            <option value="3">3 × 3</option>
+            <option value="4" selected>4 × 4</option>
+            <option value="5">5 × 5</option>
+            <option value="6">6 × 6</option>
+            <option value="7">7 × 7</option>
+            <option value="8">8 × 8</option>
+          </select>
+        </label>
+
+        <button id="saveBtn" class="secondary" type="button" disabled>시트 저장</button>
       </div>
 
       <div id="viewer" class="viewer">
@@ -201,6 +237,9 @@
       const rowsField = document.getElementById('rowsField');
       const fpsInput = document.getElementById('fps');
       const fpsText = document.getElementById('fpsText');
+      const sheetSizeField = document.getElementById('sheetSizeField');
+      const sheetSizeSelect = document.getElementById('sheetSize');
+      const saveBtn = document.getElementById('saveBtn');
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d');
       const viewer = document.getElementById('viewer');
@@ -232,7 +271,14 @@
       }
 
       function totalFrames() {
-        return mode === 'folder' ? sequence.length : (sheetImage ? grid().total : 0);
+        return mode === 'sequence' ? sequence.length : (sheetImage ? grid().total : 0);
+      }
+
+      function updateExportControls() {
+        const enabled = mode === 'sequence' && sequence.length > 0;
+        sheetSizeSelect.disabled = !enabled;
+        saveBtn.disabled = !enabled;
+        sheetSizeField.classList.toggle('disabled', !enabled);
       }
 
       function stop() {
@@ -247,6 +293,7 @@
       function clearSequence() {
         sequence.forEach(item => URL.revokeObjectURL(item.url));
         sequence = [];
+        updateExportControls();
       }
 
       function clearSheet() {
@@ -256,14 +303,15 @@
 
       function setMode(nextMode) {
         mode = nextMode;
-        const folderMode = mode === 'folder';
-        colsInput.disabled = folderMode;
-        rowsInput.disabled = folderMode;
-        colsField.classList.toggle('disabled', folderMode);
-        rowsField.classList.toggle('disabled', folderMode);
-        headerHint.textContent = folderMode
-          ? '여러 이미지 파일명 순서 재생 · 기본 16 FPS'
+        const sequenceMode = mode === 'sequence';
+        colsInput.disabled = sequenceMode;
+        rowsInput.disabled = sequenceMode;
+        colsField.classList.toggle('disabled', sequenceMode);
+        rowsField.classList.toggle('disabled', sequenceMode);
+        headerHint.textContent = sequenceMode
+          ? '여러 이미지 파일명 순서 재생 · 저장 시 2×2 ~ 8×8 스프라이트 시트 지원 · 기본 16 FPS'
           : '스프라이트 시트 기본값: 4열 × 4행 · 16 FPS';
+        updateExportControls();
       }
 
       function fitCanvas(width, height) {
@@ -293,7 +341,7 @@
         frameStatus.textContent = `프레임 ${frame + 1} / ${total}`;
       }
 
-      function drawFolderFrame() {
+      function drawSequenceFrame() {
         if (!sequence.length) return;
         frame = ((frame % sequence.length) + sequence.length) % sequence.length;
         const item = sequence[frame];
@@ -307,7 +355,7 @@
       }
 
       function drawFrame() {
-        if (mode === 'folder') drawFolderFrame();
+        if (mode === 'sequence') drawSequenceFrame();
         else drawSheetFrame();
       }
 
@@ -360,7 +408,7 @@
       async function loadSequence(fileList) {
         const files = Array.from(fileList)
           .filter(file => file.type.startsWith('image/'))
-          .sort((a, b) => naturalSort.compare(a.webkitRelativePath || a.name, b.webkitRelativePath || b.name));
+          .sort((a, b) => naturalSort.compare(a.name, b.name));
 
         if (!files.length) {
           alert('선택한 파일 중 이미지가 없습니다.');
@@ -370,7 +418,7 @@
         stop();
         clearSequence();
         clearSheet();
-        setMode('folder');
+        setMode('sequence');
         frame = 0;
         playBtn.disabled = true;
         fileStatus.textContent = `이미지 ${files.length}개 불러오는 중...`;
@@ -380,7 +428,7 @@
             const url = URL.createObjectURL(file);
             const image = new Image();
             image.onload = () => resolve({
-              name: file.webkitRelativePath || file.name,
+              name: file.name,
               url,
               image
             });
@@ -394,12 +442,94 @@
           sequence = loaded;
           empty.hidden = true;
           playBtn.disabled = false;
-          fileStatus.textContent = `다중 이미지 ${sequence.length}개 · 파일명 순서`; 
+          updateExportControls();
+          fileStatus.textContent = `다중 이미지 ${sequence.length}개 · 파일명 순서`;
           drawFrame();
         } catch (error) {
           clearSequence();
           playBtn.disabled = true;
           alert(`이미지를 불러오지 못했습니다: ${error.message}`);
+        }
+      }
+
+      function blobFromCanvas(offscreen) {
+        return new Promise((resolve, reject) => {
+          offscreen.toBlob(blob => {
+            if (blob) resolve(blob);
+            else reject(new Error('시트 이미지를 생성하지 못했습니다.'));
+          }, 'image/png');
+        });
+      }
+
+      function triggerDownload(blob, fileName) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      function baseFileName(name) {
+        return (name || 'sprite_sheet').replace(/\.[^.]+$/, '');
+      }
+
+      async function saveSpriteSheet() {
+        if (mode !== 'sequence' || !sequence.length) {
+          alert('여러 이미지를 먼저 선택해 주세요.');
+          return;
+        }
+
+        const gridSize = clampInt(sheetSizeSelect.value, 2, 8, 4);
+        const capacity = gridSize * gridSize;
+        const total = sequence.length;
+        const pageCount = Math.ceil(total / capacity);
+        const cellWidth = Math.max(...sequence.map(item => item.image.naturalWidth));
+        const cellHeight = Math.max(...sequence.map(item => item.image.naturalHeight));
+        const baseName = baseFileName(sequence[0]?.name || 'sprite_sheet');
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = '저장 중...';
+
+        try {
+          for (let page = 0; page < pageCount; page += 1) {
+            const offscreen = document.createElement('canvas');
+            offscreen.width = cellWidth * gridSize;
+            offscreen.height = cellHeight * gridSize;
+            const offCtx = offscreen.getContext('2d');
+            offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+
+            for (let i = 0; i < capacity; i += 1) {
+              const index = page * capacity + i;
+              if (index >= total) break;
+              const item = sequence[index];
+              const img = item.image;
+              const col = i % gridSize;
+              const row = Math.floor(i / gridSize);
+              const x = col * cellWidth + Math.floor((cellWidth - img.naturalWidth) / 2);
+              const y = row * cellHeight + Math.floor((cellHeight - img.naturalHeight) / 2);
+              offCtx.drawImage(img, x, y, img.naturalWidth, img.naturalHeight);
+            }
+
+            const blob = await blobFromCanvas(offscreen);
+            const fileName = pageCount === 1
+              ? `${baseName}_${gridSize}x${gridSize}.png`
+              : `${baseName}_${gridSize}x${gridSize}_${String(page + 1).padStart(2, '0')}.png`;
+            triggerDownload(blob, fileName);
+
+            await new Promise(resolve => setTimeout(resolve, 180));
+          }
+
+          alert(pageCount === 1
+            ? `${gridSize}x${gridSize} 스프라이트 시트 저장이 완료되었습니다.`
+            : `${gridSize}x${gridSize} 스프라이트 시트 ${pageCount}장이 저장되었습니다.`);
+        } catch (error) {
+          alert(error.message || '저장 중 오류가 발생했습니다.');
+        } finally {
+          updateExportControls();
+          saveBtn.textContent = '시트 저장';
         }
       }
 
@@ -416,6 +546,7 @@
       });
 
       playBtn.addEventListener('click', togglePlay);
+      saveBtn.addEventListener('click', saveSpriteSheet);
 
       [colsInput, rowsInput].forEach(input => {
         input.addEventListener('change', () => {
@@ -453,7 +584,7 @@
       });
 
       window.addEventListener('keydown', event => {
-        if (event.code === 'Space' && totalFrames() && event.target.tagName !== 'INPUT') {
+        if (event.code === 'Space' && totalFrames() && event.target.tagName !== 'INPUT' && event.target.tagName !== 'SELECT') {
           event.preventDefault();
           togglePlay();
         }
